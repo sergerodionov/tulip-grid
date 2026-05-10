@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <title>TulipGrid</title>
+  <meta name="description" content="An interactive aerial tulip field — click or drag strips to remix the landscape.">
+
+  <!-- OpenGraph -->
+  <meta property="og:type"        content="website">
+  <meta property="og:title"       content="TulipGrid">
+  <meta property="og:description" content="An interactive aerial tulip field — click or drag strips to remix the landscape.">
+  <meta property="og:image"       content="OG.jpg">
+  <meta property="og:image:width"  content="1200">
+  <meta property="og:image:height" content="630">
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:title"       content="TulipGrid">
+  <meta name="twitter:description" content="An interactive aerial tulip field — click or drag strips to remix the landscape.">
+  <meta name="twitter:image"       content="OG.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap" rel="stylesheet">
+  <link rel="preload" href="images/01.jpg" as="image" fetchpriority="high">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100dvh;
+      min-height: 100dvh;
+      overflow: hidden;
+      background: #000;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      height: var(--vh, 100dvh);
+      min-height: var(--vh, 100dvh);
+    }
+
+    /*
+      ── Image scaling rules ──
+
+      • Fit the image's shortest side to the browser window.
+      • Crop the longest side when necessary.
+      • Always fully cover the viewport — never any black gaps.
+      • Preserve proportions, never tile or repeat.
+      • Landscape: keep image upright, split into 64 vertical rows.
+      • Portrait:  rotate composition 90°, split into 64 horizontal rows.
+
+      ── Implementation ──
+
+      Source image aspect = 2000 / 1066 ≈ 1.8762.
+      Cover-scaling is expressed natively in CSS with two
+      max() expressions on a pair of custom properties:
+
+        Landscape:
+          --gw = max(100vw,  100dvh * imgW/imgH)
+          --gh = max(100dvh, 100vw  * imgH/imgW)
+
+        Portrait (pre-rotation, viewport dims swapped):
+          --gw = max(100dvh, 100vw  * imgW/imgH)
+          --gh = max(100vw,  100dvh * imgH/imgW)
+
+      Whichever axis would otherwise leave a gap is forced up
+      to the cover-required size; the other axis matches the
+      viewport. Aspect ratio is preserved because both
+      expressions share the same image ratio constant.
+
+      All 64 strip-img elements use the same --gw / --gh, so
+      rows stay perfectly aligned across resize, rotation,
+      shuffle, reset and download — there is exactly one
+      source of truth for the geometry.
+    */
+
+    /*
+      --vh holds the actual visible viewport height. JS sets it
+      from window.innerHeight (which respects mobile URL bars,
+      embedded webviews and preview panels). CSS falls back to
+      100dvh if JS hasn't run yet.
+    */
+    :root {
+      --vh: 100dvh;
+      --gw: max(100vw, calc(var(--vh) * 2000 / 1066));
+      --gh: max(var(--vh), calc(100vw * 1066 / 2000));
+    }
+
+    @media (orientation: portrait) {
+      :root {
+        --gw: max(var(--vh), calc(100vw * 2000 / 1066));
+        --gh: max(100vw, calc(var(--vh) * 1066 / 2000));
+      }
+    }
+
+    /* ── Grid stage ──
+       Acts as a viewport-sized window that hides any overflow
+       from the rotated / cover-scaled grid. */
+    #stage {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ── Grid ──
+       Sized to the cover-scaled image dimensions and centred in
+       the stage. In portrait the grid is rotated 90deg around
+       its centre so that 64 vertical strips become 64 horizontal
+       bands on screen. */
+    #grid {
+      display: flex;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: var(--gw);
+      height: var(--gh);
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+      will-change: transform;
+    }
+
+    @media (orientation: portrait) {
+      #grid {
+        transform: translate(-50%, -50%) rotate(90deg);
+      }
+    }
+
+    .strip {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    /*
+      Each strip-img is sized to the full grid and shifted left
+      by its index so only its own column is visible. Same
+      cover-scaled dimensions guarantee strip width === one
+      tulip row width at screen scale.
+    */
+    .strip-img {
+      position: absolute;
+      top: 0;
+      left: calc(var(--i, 0) * -1 * var(--gw) / 64);
+      width: var(--gw);
+      height: var(--gh);
+      /* Force the image to fill the CSS-declared box regardless of
+         its natural aspect ratio. Some browsers (notably Arc /
+         Chromium with image lazy-decoding) briefly use the natural
+         dimensions during src changes, leaving black/empty regions. */
+      min-width: var(--gw);
+      min-height: var(--gh);
+      max-width: var(--gw);
+      max-height: var(--gh);
+      object-fit: fill;
+      aspect-ratio: 2000 / 1066;
+      /* Opacity is managed exclusively via inline styles in JS —
+         no CSS class-based toggling — to avoid race conditions
+         between class changes and transition re-enabling. */
+      will-change: opacity;
+      pointer-events: none;
+      -webkit-user-drag: none;
+    }
+
+    /* ── Controls ── */
+    /*
+      Desktop: horizontal row of icon buttons, top-right.
+      Portrait: vertical column, right-center (see portrait media query).
+    */
+    #controls {
+      position: fixed;
+      top: 20px;
+      right: 1.56%;
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      z-index: 100;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 4px;
+      background: #fff;
+      border: none;
+      border-radius: 50%;
+      color: #000;
+      cursor: pointer;
+      transition: transform 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      flex-shrink: 0;
+      /* Pre-promote to GPU layer so hover scale never causes a blink */
+      will-change: transform;
+    }
+
+    .btn:hover { transform: scale(1.12); }
+    .btn:active { transform: scale(0.90); }
+
+    .btn.loading-state {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    .btn svg {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    /* ── Overlay text (logo, note, copyright) ── */
+    /*
+      All three are fixed overlays in viewport coordinates, so they
+      are unaffected by the 90° grid rotation in portrait mode.
+      pointer-events: none keeps them non-interactive.
+    */
+    #logo, #ui-note, #copyright {
+      position: fixed;
+      font-family: 'Jersey 10', monospace;
+      font-style: normal;
+      line-height: normal;
+      color: #fff;
+      white-space: nowrap;
+      margin: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Desktop positions */
+    #logo {
+      font-size: 96px;
+      top: 20px;
+      left: 1.56%;
+    }
+
+    #ui-note {
+      font-size: 20px;
+      bottom: 20px;
+      left: 1.56%;
+    }
+
+    #copyright {
+      font-size: 20px;
+      bottom: 20px;
+      right: 1.56%;
+    }
+
+    /* Hide the correct note variant (toggled via portrait query) */
+    .note-portrait { display: none; }
+
+    /* Copyright link */
+    #copyright a {
+      color: inherit;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-thickness: 1px;
+    }
+    #copyright a:hover {
+      text-decoration: none;
+    }
+
+    /* ── Loading screen ── */
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: #080808;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      transition: opacity 0.7s ease;
+    }
+
+    #loading.done {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-ring {
+      width: 28px;
+      height: 28px;
+      border: 1.5px solid rgba(255, 255, 255, 0.12);
+      border-top-color: rgba(255, 255, 255, 0.5);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Portrait (mobile) layout overrides ── */
+    @media (orientation: portrait) {
+      /* Logo: top-center */
+      #logo {
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+      }
+
+      /* Note: just below the logo, centered */
+      #ui-note {
+        bottom: auto;
+        top: 101px;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+      }
+
+      /* Swap note text: "Tap" instead of "Click" */
+      .note-landscape { display: none; }
+      .note-portrait  { display: inline; }
+
+      /* Copyright: bottom-center */
+      #copyright {
+        right: auto;
+        left: 50%;
+        bottom: 20px;
+        transform: translateX(-50%);
+        text-align: center;
+      }
+
+      /* Controls: vertical column, right-center */
+      #controls {
+        top: 50%;
+        right: 21px;
+        transform: translateY(-50%);
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<p id="logo" aria-label="TulipGrid">TulipGrid</p>
+
+<p id="ui-note">
+  <span class="note-landscape">Click rows to remix the landscape</span>
+  <span class="note-portrait">Tap rows to remix the landscape</span>
+</p>
+
+<p id="copyright">© 2026 <a href="https://rodionov.se" target="_blank" rel="noopener noreferrer">Sergii Rodionov</a></p>
+
+<div id="loading" aria-label="Loading" role="status">
+  <div class="loading-ring"></div>
+</div>
+
+<div id="stage" aria-hidden="false">
+  <div id="grid" role="img" aria-label="Interactive field grid"></div>
+</div>
+
+<nav id="controls" aria-label="Controls">
+  <button class="btn" id="btnShuffle" type="button" aria-label="Shuffle strips">
+    <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M19.293 20.293a1 1 0 0 1 1.414 0L25 24.586V22a1 1 0 1 1 2 0v5a1 1 0 0 1-1 1h-5a1 1 0 1 1 0-2h2.586l-4.293-4.293a1 1 0 0 1 0-1.414ZM8.293 9.293a1 1 0 0 1 1.414 0l5 5a1 1 0 0 1-1.414 1.414l-5-5a1 1 0 0 1 0-1.414ZM27 14a1 1 0 0 1-2 0v-2.586L9.707 26.707a1 1 0 0 1-1.414-1.414L23.586 10H21a1 1 0 1 1 0-2h5a1 1 0 0 1 1 1v5Z"/>
+    </svg>
+  </button>
+
+  <button class="btn" id="btnReset" type="button" aria-label="Reset to original">
+    <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M7.00098 9.99059C7.00098 9.4383 7.44869 8.99059 8.00098 8.99059C8.55326 8.99059 9.00098 9.4383 9.00098 9.99059V14.9906H14.001C14.5533 14.9906 15.001 15.4383 15.001 15.9906C15.001 16.5429 14.5533 16.9906 14.001 16.9906H8.00098C7.44869 16.9906 7.00098 16.5429 7.00098 15.9906V9.99059Z"/>
+      <path fill="currentColor" d="M17.6064 8.09757C19.7533 7.79554 21.9405 8.19905 23.8379 9.24796C25.7352 10.2969 27.2399 11.9344 28.126 13.913C29.012 15.8917 29.231 18.1047 28.75 20.2187C28.2689 22.3327 27.114 24.2332 25.459 25.6337C23.804 27.0341 21.7387 27.8587 19.5742 27.9833C17.4098 28.1079 15.2637 27.5254 13.459 26.3241C11.6542 25.1228 10.2878 23.368 9.56738 21.3232C9.38387 20.8023 9.65786 20.2313 10.1787 20.0478C10.6996 19.8643 11.2705 20.1373 11.4541 20.6581C12.0304 22.2938 13.1228 23.698 14.5664 24.6591C16.0102 25.6201 17.7275 26.0859 19.459 25.9862C21.1904 25.8866 22.843 25.2276 24.167 24.1073C25.491 22.987 26.4149 21.4664 26.7998 19.7753C27.1847 18.0841 27.0096 16.3134 26.3008 14.7304C25.592 13.1475 24.3879 11.8381 22.8701 10.9989C21.3522 10.1598 19.6023 9.83639 17.8848 10.078C16.1675 10.3197 14.575 11.1126 13.3477 12.3378C13.3406 12.3448 13.3334 12.3525 13.3262 12.3593L8.68555 16.7196C8.28315 17.0975 7.6506 17.0778 7.27246 16.6757C6.89427 16.2732 6.91393 15.6398 7.31641 15.2616L11.9561 10.9023C13.4875 9.38247 15.4694 8.39824 17.6064 8.09757Z"/>
+    </svg>
+  </button>
+
+  <button class="btn" id="btnDownload" type="button" aria-label="Download current composition">
+    <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M8 25v-4a1 1 0 1 1 2 0v4c0 .265.105.52.293.707.187.188.441.293.707.293h14c.265 0 .52-.105.707-.293.188-.187.293-.442.293-.707v-4a1 1 0 1 1 2 0v4a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3ZM17 9a1 1 0 1 1 2 0v9.586l3.293-3.293a1 1 0 0 1 1.414 1.414l-5 5a1 1 0 0 1-1.414 0l-5-5a1 1 0 0 1 1.414-1.414L17 18.586V9Z"/>
+    </svg>
+  </button>
+</nav>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── Config ───────────────────────────────────────────── */
+  const STRIP_COUNT = 64;
+  const IMAGE_SRCS = [
+    'images/01.jpg',
+    'images/02.jpg',
+    'images/03.jpg',
+    'images/04.jpg',
+    'images/05.jpg',
+    'images/06.jpg',
+    'images/07.jpg',
+    'images/08.jpg',
+  ];
+  const N = IMAGE_SRCS.length;
+
+  // Natural pixel dimensions of every source image (they're all the same).
+  const IMG_W = 2000;
+  const IMG_H = 1066;
+
+  /* ── State ────────────────────────────────────────────── */
+  const state = new Uint8Array(STRIP_COUNT); // current image index per strip
+  const strips = [];                          // strip descriptors
+  const imgCache = new Array(N).fill(null);  // loaded Image objects for canvas
+  let pendingTimers = [];                     // stagger timeout IDs
+
+  /* ── Build DOM ────────────────────────────────────────── */
+  const stage = document.getElementById('stage');
+  const grid = document.getElementById('grid');
+  const loadingEl = document.getElementById('loading');
+
+  /*
+    ── Robust viewport height ──
+    Some environments (iOS Safari with URL bar, embedded
+    webviews, preview iframes) compute 100dvh in ways that
+    leave gaps. We mirror window.innerHeight onto a CSS
+    custom property so the cover formulas always reference
+    the real visible height.
+  */
+  function setVH() {
+    document.documentElement.style.setProperty('--vh', window.innerHeight + 'px');
+  }
+  setVH();
+  window.addEventListener('resize', setVH);
+  window.addEventListener('orientationchange', setVH);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setVH);
+  }
+
+  /* ── Cover-scale dimensions (mirrors the CSS) ─────────── */
+  /*
+    The CSS uses max() to cover-scale the grid in both
+    orientations. This helper returns the same dimensions in
+    pixels so the canvas exporter can render an identical
+    composition.
+  */
+  function getCoverDims() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const portrait = matchMedia('(orientation: portrait)').matches;
+
+    // Container dimensions BEFORE rotation: swapped in portrait.
+    const cw = portrait ? vh : vw;
+    const ch = portrait ? vw : vh;
+
+    const scale = Math.max(cw / IMG_W, ch / IMG_H);
+    return {
+      portrait,
+      vw, vh,
+      gridW: IMG_W * scale,
+      gridH: IMG_H * scale,
+    };
+  }
+
+  for (let i = 0; i < STRIP_COUNT; i++) {
+    const div = document.createElement('div');
+    div.className = 'strip';
+    div.dataset.idx = i;
+
+    // Two image layers for crossfade; layer-a starts visible
+    const imgA = createImg(i);
+    imgA.style.opacity = '1';
+    const imgB = createImg(i);
+    imgB.style.opacity = '0'; // hidden — managed via inline style, not CSS class
+
+    div.appendChild(imgA);
+    div.appendChild(imgB);
+    grid.appendChild(div);
+
+    strips.push({ div, imgA, imgB, front: 'a' });
+  }
+
+  function createImg(i) {
+    const img = document.createElement('img');
+    img.className = 'strip-img';
+    img.style.setProperty('--i', i);
+    // Tell the browser the intrinsic aspect ratio so it never falls
+    // back to natural dimensions while the src is changing.
+    img.width = IMG_W;
+    img.height = IMG_H;
+    img.decoding = 'async'; // let browser schedule decode; we gate on decode() promise
+    img.loading = 'eager';
+    img.draggable = false;
+    return img;
+  }
+
+  /* ── Preload strategy ────────────────────────────────── */
+  /*
+    Mobile Safari crashes when 8 large JPEGs are decoded simultaneously
+    (each 2000×1066 × 4 bytes ≈ 8 MB decoded; ×8 = ~68 MB before the
+    UI even appears). We therefore split loading into two phases:
+
+    Phase 1 — block on image 0 only.
+      One decode() call, one image in memory. The loading screen
+      disappears as soon as image 0 is paint-ready.
+
+    Phase 2 — background-fetch images 1–7 after the UI is visible.
+      Plain <img> onload, no decode(), no memory spike. imgCache is
+      populated lazily; strip transitions work fine because the browser
+      HTTP-cache makes src-swaps near-instant once an image has been
+      fetched at least once.
+
+    The 64-strip decode() wave from the old onAllLoaded is also gone —
+    setting src on elements whose URL is already in the HTTP cache is
+    enough; the browser reuses the decoded bitmap without a separate
+    decode step.
+  */
+
+  // Phase 1: load image 0, set all strips, reveal UI.
+  const seed = new Image();
+  seed.src = IMAGE_SRCS[0];
+
+  const onSeedReady = () => {
+    imgCache[0] = seed.naturalWidth > 0 ? seed : null;
+
+    // Point every strip front-layer at image 0.
+    // Inline opacity is set here to establish canonical state for
+    // the inline-only transition logic in setStrip.
+    strips.forEach(s => {
+      s.imgA.style.opacity   = '1';
+      s.imgA.style.transition = '';
+      s.imgB.style.opacity   = '0';
+      s.imgB.style.transition = '';
+      s.imgA.src = IMAGE_SRCS[0];
+    });
+
+    // Two rAF ticks let the browser commit the src changes and paint
+    // at least one frame before we fade the loading screen out.
+    requestAnimationFrame(() => requestAnimationFrame(revealUI));
+
+    // Phase 2: silently fetch images 1–7 in the background.
+    IMAGE_SRCS.slice(1).forEach((src, j) => {
+      const idx = j + 1;
+      const img = new Image();
+      img.onload  = () => { imgCache[idx] = img; };
+      img.onerror = () => {};
+      img.src = src;
+    });
+  };
+
+  // Fallback: if decode() hangs for > 8 s, reveal UI anyway.
+  const seedTimeout = setTimeout(onSeedReady, 8000);
+
+  if (typeof seed.decode === 'function') {
+    seed.decode()
+      .then(() => { clearTimeout(seedTimeout); onSeedReady(); })
+      .catch(() => { clearTimeout(seedTimeout); onSeedReady(); });
+  } else {
+    seed.onload  = () => { clearTimeout(seedTimeout); onSeedReady(); };
+    seed.onerror = () => { clearTimeout(seedTimeout); onSeedReady(); };
+  }
+
+  function revealUI() {
+    setTimeout(() => {
+      loadingEl.classList.add('done');
+      setTimeout(() => loadingEl.remove(), 800);
+    }, 120);
+  }
+
+  /* ── Core: change one strip ───────────────────────────── */
+  function setStrip(i, imgIdx) {
+    const s = strips[i];
+    if (state[i] === imgIdx) return;
+
+    // Bump generation so any in-flight decode for this strip is ignored.
+    const gen = s.gen = (s.gen || 0) + 1;
+
+    // incoming = the layer we'll fade IN; outgoing = currently visible layer.
+    const incoming = s.front === 'a' ? s.imgB : s.imgA;
+    const outgoing  = s.front === 'a' ? s.imgA : s.imgB;
+
+    /*
+      Opacity is managed ENTIRELY via inline styles (never CSS classes).
+
+      Setting an inline style always wins over a class rule, so there is
+      no risk of a class-vs-transition race. We also force a reflow after
+      each instant snap so the browser commits the "from" value before we
+      enable the transition, guaranteeing the animation fires correctly.
+
+      Step 1 — hide incoming immediately.
+      Disabling the transition first means the opacity:0 is applied
+      synchronously (no animation). The forced reflow records it as the
+      committed paint state.
+    */
+    incoming.style.transition = 'none';
+    incoming.style.opacity    = '0';
+    void incoming.offsetWidth;  // commit opacity:0 as the "from" state
+
+    incoming.onload = null;
+    incoming.src = IMAGE_SRCS[imgIdx];
+
+    const commit = () => {
+      if (s.gen !== gen) return;
+
+      /*
+        Step 2 — guarantee the outgoing backdrop is rock-solid.
+        If a previous 460ms cleanup was fading outgoing out, cancel it
+        by snapping it back to fully opaque instantly. The reflow also
+        re-commits incoming's opacity:0, giving us a clean "from" baseline
+        for the fade-in that follows.
+      */
+      outgoing.style.transition = 'none';
+      outgoing.style.opacity    = '1';
+      void outgoing.offsetWidth;  // commits both outgoing:1 and incoming:0
+
+      // Put incoming on top; outgoing is the solid backdrop below.
+      incoming.style.zIndex = '1';
+      outgoing.style.zIndex = '0';
+
+      // Step 3 — fade incoming in over 450 ms.
+      // Transition is re-enabled AFTER the reflow so the browser sees
+      // a genuine opacity change from the committed 0 to the new 1.
+      incoming.style.transition = 'opacity 0.45s ease';
+      incoming.style.opacity    = '1';
+
+      s.front = s.front === 'a' ? 'b' : 'a';
+      state[i] = imgIdx;
+
+      const g = gen;
+      setTimeout(() => {
+        if (s.gen !== g) return;   // newer transition took over — skip
+        // Step 4 — fade outgoing out (incoming is now fully opaque above it).
+        outgoing.style.transition = 'opacity 0.45s ease';
+        outgoing.style.opacity    = '0';
+        outgoing.style.zIndex     = '';
+      }, 460);
+    };
+
+    if (typeof incoming.decode === 'function') {
+      incoming.decode().then(commit).catch(() => {});
+    } else if (incoming.complete && incoming.naturalWidth > 0) {
+      commit();
+    } else {
+      incoming.onload = commit;
+    }
+  }
+
+  function randomOther(current) {
+    if (N <= 1) return current;
+    let n;
+    do { n = (Math.random() * N) | 0; } while (n === current);
+    return n;
+  }
+
+  function clearPending() {
+    pendingTimers.forEach(clearTimeout);
+    pendingTimers = [];
+  }
+
+  /* ── Interaction: desktop drag + click ────────────────── */
+  let isDragging = false;
+  let lastDragStrip = -1;
+  let dragActivations = 0;
+
+  stage.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    isDragging = true;
+    lastDragStrip = -1;
+    dragActivations = 0;
+    activateAt(e.clientX, e.clientY);
+    document.addEventListener('mouseup', onMouseUp, { once: true });
+  });
+
+  stage.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    activateAt(e.clientX, e.clientY);
+  });
+
+  function onMouseUp() {
+    isDragging = false;
+  }
+
+  // click fires after mouseup; suppress if drag already handled it
+  stage.addEventListener('click', (e) => {
+    if (dragActivations > 0) return;
+    const div = e.target.closest('.strip');
+    if (!div) return;
+    const i = +div.dataset.idx;
+    setStrip(i, randomOther(state[i]));
+  });
+
+  /* ── Interaction: touch drag ──────────────────────────── */
+  let isTouching = false;
+  let lastTouchStrip = -1;
+
+  stage.addEventListener('touchstart', (e) => {
+    isTouching = true;
+    lastTouchStrip = -1;
+    const t = e.touches[0];
+    activateAt(t.clientX, t.clientY);
+  }, { passive: true });
+
+  stage.addEventListener('touchmove', (e) => {
+    if (!isTouching) return;
+    const t = e.touches[0];
+    activateAt(t.clientX, t.clientY, true /* isTouchDrag */);
+  }, { passive: true });
+
+  stage.addEventListener('touchend', () => {
+    isTouching = false;
+    lastTouchStrip = -1;
+  }, { passive: true });
+
+  /*
+    Resolve which strip is under (x, y) screen coordinates.
+    Using elementFromPoint means rotation, cover-scaling and
+    overflow clipping are all handled by the browser — no
+    manual coordinate maths needed.
+  */
+  function activateAt(x, y, isTouchDrag = false) {
+    const el = document.elementFromPoint(x, y);
+    const div = el && el.closest ? el.closest('.strip') : null;
+    if (!div) return;
+    const i = +div.dataset.idx;
+
+    const last = isTouchDrag ? lastTouchStrip : lastDragStrip;
+    if (i === last) return; // same strip, skip
+
+    if (isTouchDrag) lastTouchStrip = i;
+    else { lastDragStrip = i; dragActivations++; }
+
+    setStrip(i, randomOther(state[i]));
+  }
+
+  /* ── Buttons ──────────────────────────────────────────── */
+  document.getElementById('btnShuffle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearPending();
+
+    // Ripple left-to-right with stagger.
+    // Generation is now managed inside setStrip so no external gen
+    // bookkeeping needed here; clearPending() handles in-flight timers.
+    const delay = Math.max(3, 380 / STRIP_COUNT);
+    pendingTimers = strips.map((_, i) =>
+      setTimeout(() => setStrip(i, randomOther(state[i])), i * delay)
+    );
+  });
+
+  document.getElementById('btnReset').addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearPending();
+
+    const delay = Math.max(3, 380 / STRIP_COUNT);
+    pendingTimers = strips.map((_, i) =>
+      setTimeout(() => setStrip(i, 0), i * delay)
+    );
+  });
+
+  document.getElementById('btnDownload').addEventListener('click', (e) => {
+    e.stopPropagation();
+    downloadCanvas();
+  });
+
+  /* ── Download via canvas ──────────────────────────────── */
+  /*
+    Re-render the visible composition into a canvas at viewport
+    size and export as JPEG. The pre-rotation composition is
+    drawn into an offscreen buffer; in portrait we then rotate
+    it 90deg CW onto the final canvas so the exported image
+    matches what's on screen.
+  */
+  function downloadCanvas() {
+    const btn = document.getElementById('btnDownload');
+    btn.classList.add('loading-state');
+
+    const { portrait, vw, vh, gridW: gW, gridH: gH } = getCoverDims();
+
+    // Pre-rotation container (swapped dims in portrait)
+    const containerW = portrait ? vh : vw;
+    const containerH = portrait ? vw : vh;
+
+    const offX = (containerW - gW) / 2; // negative if grid overflows
+    const offY = (containerH - gH) / 2;
+
+    // Offscreen buffer in pre-rotation orientation
+    const off = document.createElement('canvas');
+    off.width  = containerW;
+    off.height = containerH;
+    const octx = off.getContext('2d');
+    octx.fillStyle = '#000';
+    octx.fillRect(0, 0, containerW, containerH);
+
+    const stripW = gW / STRIP_COUNT;
+    const srcSW  = IMG_W / STRIP_COUNT;
+
+    for (let i = 0; i < STRIP_COUNT; i++) {
+      const img = imgCache[state[i]];
+      if (!img) continue;
+      octx.drawImage(
+        img,
+        i * srcSW, 0, srcSW, IMG_H,
+        offX + i * stripW, offY, stripW, gH
+      );
+    }
+
+    // Final canvas in viewport orientation
+    const out = document.createElement('canvas');
+    out.width  = vw;
+    out.height = vh;
+    const fctx = out.getContext('2d');
+
+    if (portrait) {
+      // 90deg CW: move origin to top-right, rotate, then draw at (0,0).
+      fctx.translate(vw, 0);
+      fctx.rotate(Math.PI / 2);
+      fctx.drawImage(off, 0, 0);
+    } else {
+      fctx.drawImage(off, 0, 0);
+    }
+
+    out.toBlob((blob) => {
+      if (!blob) { btn.classList.remove('loading-state'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement('a'), {
+        href: url,
+        download: 'field-grid.jpg',
+      });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      btn.classList.remove('loading-state');
+    }, 'image/jpeg', 0.93);
+  }
+
+})();
+</script>
+</body>
+</html>

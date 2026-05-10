@@ -1,0 +1,17 @@
+# Cache images for 1 year — they never change between deploys
+[[headers]]
+  for = "/images/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Cache the OG image similarly
+[[headers]]
+  for = "/OG.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# HTML: always revalidate so updates ship immediately
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
