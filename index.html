@@ -206,6 +206,33 @@
       width: 24px;
       height: 24px;
       flex-shrink: 0;
+      color: #000;
+    }
+
+    /* Sound button: toggle between muted/on icons via parent class */
+    #btnSound .icon-sound-on { display: none; }
+    #btnSound.on .icon-sound-muted { display: none; }
+    #btnSound.on .icon-sound-on { display: block; }
+
+    /* ── Initial-hidden state for typewriter reveal ──
+       Buttons and overlay text start invisible; JS fades them in
+       character-by-character (text) and one-by-one (icons) after the
+       loading screen disappears. */
+    .btn {
+      opacity: 0;
+      transition: opacity 0.3s ease, transform 0.15s ease;
+      pointer-events: none;
+    }
+    .btn.revealed {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .tw-char {
+      opacity: 0;
+    }
+    .tw-char.shown {
+      opacity: 1;
     }
 
     /* ── Overlay text (logo, note, copyright) ── */
@@ -220,11 +247,13 @@
       font-style: normal;
       line-height: normal;
       color: #fff;
-      white-space: nowrap;
       margin: 0;
       user-select: text;
       -webkit-user-select: text;
       z-index: 10;
+    }
+    #logo, #ui-note {
+      white-space: nowrap;
     }
 
     /* Desktop positions */
@@ -244,6 +273,13 @@
       font-size: 20px;
       bottom: 20px;
       right: 1.56%;
+      text-align: right;
+      line-height: 1.2;
+    }
+
+    #copyright .cline {
+      display: block;
+      white-space: nowrap;
     }
 
     /* Hide the correct note variant (toggled via portrait query) */
@@ -341,7 +377,11 @@
   <span class="note-portrait">Tap rows to remix the landscape</span>
 </p>
 
-<p id="copyright">© 2026 <a href="https://rodionov.se" target="_blank" rel="noopener noreferrer">Sergii Rodionov</a></p>
+<p id="copyright">
+  <span class="cline">Shot with a lightweight drone</span>
+  <span class="cline">in Hillegom and Schagen, Netherlands,</span>
+  <span class="cline">April 2026 © <a href="https://rodionov.se" target="_blank" rel="noopener noreferrer">Sergii Rodionov</a></span>
+</p>
 
 <div id="loading" aria-label="Loading" role="status">
   <div class="loading-ring"></div>
@@ -353,21 +393,29 @@
 
 <nav id="controls" aria-label="Controls">
   <button class="btn" id="btnShuffle" type="button" aria-label="Shuffle strips">
-    <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-      <path fill="currentColor" d="M19.293 20.293a1 1 0 0 1 1.414 0L25 24.586V22a1 1 0 1 1 2 0v5a1 1 0 0 1-1 1h-5a1 1 0 1 1 0-2h2.586l-4.293-4.293a1 1 0 0 1 0-1.414ZM8.293 9.293a1 1 0 0 1 1.414 0l5 5a1 1 0 0 1-1.414 1.414l-5-5a1 1 0 0 1 0-1.414ZM27 14a1 1 0 0 1-2 0v-2.586L9.707 26.707a1 1 0 0 1-1.414-1.414L23.586 10H21a1 1 0 1 1 0-2h5a1 1 0 0 1 1 1v5Z"/>
+    <svg viewBox="0 0 24 26" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M2 20H5V23H2V20ZM4 18H7V21H4V18ZM6 16H9V19H6V16ZM8 14H11V17H8V14ZM10 12H13V15H10V12ZM12 10H15V13H12V10ZM14 8H17V11H14V8ZM16 6H19V9H16V6ZM18 4H21V7H18V4ZM18 19H21V22H18V19ZM16 17H19V20H16V17ZM14 15H17V18H14V15ZM6 7H9V10H6V7ZM4 5H7V8H4V5ZM2 3H5V6H2V3ZM20 2H23V5H20V2ZM23 21V24H20V21H23ZM20 5H23V8H20V5ZM20 21V24H17V21H20ZM20 8H23V11H20V8ZM17 21V24H14V21H17ZM17 2H20V5H17V2ZM23 18V21H20V18H23ZM14 2H17V5H14V2ZM23 15V18H20V15H23Z"/>
     </svg>
   </button>
 
   <button class="btn" id="btnReset" type="button" aria-label="Reset to original">
-    <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-      <path fill="currentColor" d="M7.00098 9.99059C7.00098 9.4383 7.44869 8.99059 8.00098 8.99059C8.55326 8.99059 9.00098 9.4383 9.00098 9.99059V14.9906H14.001C14.5533 14.9906 15.001 15.4383 15.001 15.9906C15.001 16.5429 14.5533 16.9906 14.001 16.9906H8.00098C7.44869 16.9906 7.00098 16.5429 7.00098 15.9906V9.99059Z"/>
-      <path fill="currentColor" d="M17.6064 8.09757C19.7533 7.79554 21.9405 8.19905 23.8379 9.24796C25.7352 10.2969 27.2399 11.9344 28.126 13.913C29.012 15.8917 29.231 18.1047 28.75 20.2187C28.2689 22.3327 27.114 24.2332 25.459 25.6337C23.804 27.0341 21.7387 27.8587 19.5742 27.9833C17.4098 28.1079 15.2637 27.5254 13.459 26.3241C11.6542 25.1228 10.2878 23.368 9.56738 21.3232C9.38387 20.8023 9.65786 20.2313 10.1787 20.0478C10.6996 19.8643 11.2705 20.1373 11.4541 20.6581C12.0304 22.2938 13.1228 23.698 14.5664 24.6591C16.0102 25.6201 17.7275 26.0859 19.459 25.9862C21.1904 25.8866 22.843 25.2276 24.167 24.1073C25.491 22.987 26.4149 21.4664 26.7998 19.7753C27.1847 18.0841 27.0096 16.3134 26.3008 14.7304C25.592 13.1475 24.3879 11.8381 22.8701 10.9989C21.3522 10.1598 19.6023 9.83639 17.8848 10.078C16.1675 10.3197 14.575 11.1126 13.3477 12.3378C13.3406 12.3448 13.3334 12.3525 13.3262 12.3593L8.68555 16.7196C8.28315 17.0975 7.6506 17.0778 7.27246 16.6757C6.89427 16.2732 6.91393 15.6398 7.31641 15.2616L11.9561 10.9023C13.4875 9.38247 15.4694 8.39824 17.6064 8.09757Z"/>
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M3 14H6V17H3V14ZM4 16H7V19H4V16ZM6 18H9V21H6V18ZM9 19H12V22H9V19ZM12 19H15V22H12V19ZM15 18H18V21H15V18ZM17 16H20V19H17V16ZM19 14H22V17H19V14ZM20 11H23V14H20V11ZM20 8H23V11H20V8ZM19 6H22V9H19V6ZM17 4H20V7H17V4ZM15 2H18V5H15V2ZM12 2H15V5H12V2ZM9 2H12V5H9V2ZM7 3H10V6H7V3ZM5 4H8V7H5V4ZM3 6H6V9H3V6ZM4 11H1V8H4V11ZM4 8H1V5H4V8ZM4 5H1V2H4V5ZM7 11H4V8H7V11ZM10 11H7V8H10V11Z"/>
     </svg>
   </button>
 
   <button class="btn" id="btnDownload" type="button" aria-label="Download current composition">
-    <svg viewBox="0 0 36 36" fill="none" aria-hidden="true">
-      <path fill="currentColor" d="M8 25v-4a1 1 0 1 1 2 0v4c0 .265.105.52.293.707.187.188.441.293.707.293h14c.265 0 .52-.105.707-.293.188-.187.293-.442.293-.707v-4a1 1 0 1 1 2 0v4a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3ZM17 9a1 1 0 1 1 2 0v9.586l3.293-3.293a1 1 0 0 1 1.414 1.414l-5 5a1 1 0 0 1-1.414 0l-5-5a1 1 0 0 1 1.414-1.414L17 18.586V9Z"/>
+    <svg viewBox="0 0 25 24" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M2 14H5V17H2V14ZM5 8H8V11H5V8ZM7 10H10V13H7V10ZM9 12H12V15H9V12ZM11 14H14V17H11V14ZM11 2H14V5H11V2ZM11 5H14V8H11V5ZM11 8H14V11H11V8ZM11 11H14V14H11V11ZM13 12H16V15H13V12ZM15 10H18V13H15V10ZM17 8H20V11H17V8ZM2 17H5V20H2V17ZM2 19H5V22H2V19ZM5 19H8V22H5V19ZM8 19H11V22H8V19ZM11 19H14V22H11V19ZM14 19H17V22H14V19ZM17 19H21V22H17V19ZM20 19H23V22H20V19ZM20 16H23V19H20V16ZM20 14H23V17H20V14Z"/>
+    </svg>
+  </button>
+
+  <button class="btn" id="btnSound" type="button" aria-label="Toggle sound" aria-pressed="false">
+    <svg class="icon-sound-muted" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M1 8H4V11H1V8ZM4 8H7V11H4V8ZM4 13H7V16H4V13ZM6 15H9V18H6V15ZM6 9V6H9V9H6ZM8 17H11V20H8V17ZM8 7V4H11V7H8ZM10 19H13V22H10V19ZM10 16H13V19H10V16ZM10 13H13V16H10V13ZM10 10H13V13H10V10ZM10 7H13V10H10V7ZM10 4H13V7H10V4ZM10 2H13V5H10V2ZM1 11H4V14H1V11ZM1 13H4V16H1V13ZM14 8H17V11H14V8ZM16 10H19V13H16V10ZM18 12H21V15H18V12ZM14 14H17V17H14V14ZM17 11H20V14H17V11ZM20 8H23V11H20V8ZM20 14H23V17H20V14Z"/>
+    </svg>
+    <svg class="icon-sound-on" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M1 8H4V11H1V8ZM4 8H7V11H4V8ZM4 13H7V16H4V13ZM6 15H9V18H6V15ZM6 9V6H9V9H6ZM8 17H11V20H8V17ZM8 7V4H11V7H8ZM10 19H13V22H10V19ZM10 16H13V19H10V16ZM10 13H13V16H10V13ZM10 10H13V13H10V10ZM10 7H13V10H10V7ZM10 4H13V7H10V4ZM10 2H13V5H10V2ZM1 11H4V14H1V11ZM1 13H4V16H1V13ZM15 10H18V13H15V10ZM18 8H21V16H18V8ZM21 6H24V18H21V6Z"/>
     </svg>
   </button>
 </nav>
@@ -574,9 +622,14 @@
       paintFull(strips[i], i, 0);
     }
 
-    // Two rAF ticks let the browser commit the canvas paints
-    // before we fade the loading screen out.
-    requestAnimationFrame(() => requestAnimationFrame(revealUI));
+    // Two rAF ticks let the browser commit the canvas paints before
+    // we fade the loading screen out. setTimeout fallback guarantees
+    // progress even if rAF is throttled (e.g. background tabs or
+    // certain headless/preview environments where rAF never fires).
+    let revealFired = false;
+    const doReveal = () => { if (!revealFired) { revealFired = true; revealUI(); } };
+    requestAnimationFrame(() => requestAnimationFrame(doReveal));
+    setTimeout(doReveal, 200);
 
     // Phase 2: silently fetch images 1–7 in the background.
     IMAGE_SRCS.slice(1).forEach((src, j) => {
@@ -604,7 +657,91 @@
     setTimeout(() => {
       loadingEl.classList.add('done');
       setTimeout(() => loadingEl.remove(), 800);
+      // Start typewriter + icon reveal once the loading screen begins fading.
+      runIntroAnimation();
     }, 120);
+  }
+
+  /* ── Intro animation: typewriter text + sequential icon reveal ── */
+  /*
+    Behaviour:
+      • All visible text is wrapped in per-character spans whose opacity
+        starts at 0. We flip each one to opacity 1 in sequence, like a
+        terminal printing characters one at a time.
+      • The three text blocks (logo, note, copyright) start in an
+        overlapping cascade so the total intro fits in ~3 seconds.
+      • After the longest text finishes, control icons fade in one by
+        one (left-to-right on desktop; top-to-bottom in portrait —
+        document order matches both because the controls flex direction
+        runs in the right direction for each layout).
+  */
+  function splitChars(el) {
+    // Replace every text node inside `el` with a sequence of
+    // <span class="tw-char"> wrappers — one per character. Preserves
+    // nested elements (e.g. the <a> link inside the copyright).
+    // Skips elements that are hidden by CSS (e.g. .note-landscape in
+    // portrait mode) so the hidden variant doesn't waste animation
+    // time on text the user can't see.
+    const chars = [];
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent;
+        if (!text || (/^\s*$/.test(text) && text.indexOf('\n') >= 0)) {
+          // Pure whitespace between block elements — keep as-is.
+          return;
+        }
+        const frag = document.createDocumentFragment();
+        for (const ch of text) {
+          const span = document.createElement('span');
+          span.className = 'tw-char';
+          span.textContent = ch;
+          frag.appendChild(span);
+          chars.push(span);
+        }
+        node.parentNode.replaceChild(frag, node);
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        if (getComputedStyle(node).display === 'none') return;
+        const children = Array.from(node.childNodes);
+        for (const child of children) walk(child);
+      }
+    };
+    walk(el);
+    return chars;
+  }
+
+  let introStarted = false;
+
+  function typewrite(chars, charDelay, startDelay) {
+    return new Promise(resolve => {
+      let idx = 0;
+      const tick = () => {
+        if (idx >= chars.length) return resolve();
+        chars[idx].classList.add('shown');
+        idx++;
+        setTimeout(tick, charDelay);
+      };
+      setTimeout(tick, startDelay);
+    });
+  }
+
+  function runIntroAnimation() {
+    if (introStarted) return;  // guard against double-fire from preload race
+    introStarted = true;
+    const logoChars      = splitChars(document.getElementById('logo'));
+    const noteChars      = splitChars(document.getElementById('ui-note'));
+    const copyrightChars = splitChars(document.getElementById('copyright'));
+
+    // Cascading starts so the three blocks finish near the same time.
+    typewrite(logoChars,      45,   0);
+    typewrite(noteChars,      35, 250);
+    typewrite(copyrightChars, 22, 500).then(revealButtons);
+  }
+
+  function revealButtons() {
+    const btns = document.querySelectorAll('#controls .btn');
+    btns.forEach((btn, i) => {
+      setTimeout(() => btn.classList.add('revealed'), 150 + i * 180);
+    });
   }
 
   /* ── Core: change one strip ───────────────────────────── */
@@ -657,6 +794,7 @@
 
     const fromIdx = s.currentIdx;
     state[i] = imgIdx;
+    playStripTone(i);
     const start = performance.now();
 
     function frame(now) {
@@ -789,36 +927,193 @@
     downloadCanvas();
   });
 
+  /* ── Sound system ─────────────────────────────────────── */
+  /*
+    Two layers of audio, both generated on-the-fly via Web Audio API
+    (no audio files to ship, no decode delay, no per-row mp3s):
+
+      • Ambient drone — a low sine oscillator (~55 Hz) plus filtered
+        white noise, sitting at ~6% gain. Feels like a powered-on
+        arcade cabinet. Fades in/out over 500ms / 300ms.
+
+      • Row tones — 64 short blips, one per strip. Pitch climbs
+        exponentially from 110 Hz (row 0) to 1760 Hz (row 63),
+        spanning four octaves. Waveform shifts by quartile (sine →
+        triangle → square → sawtooth) so the lower rows feel softer,
+        the upper rows crisper. Each blip is 80–180 ms with a fast
+        attack and exponential decay, plus a slight downward pitch
+        sweep for retro character.
+
+    Browsers block autoplay before the first user gesture, so the
+    AudioContext is created lazily inside the sound-toggle click
+    handler. If the user never enables sound, no audio code runs.
+  */
+  let audioCtx     = null;
+  let ambient      = null;
+  let soundOn      = false;
+  const btnSound   = document.getElementById('btnSound');
+
+  function ensureAudioCtx() {
+    if (audioCtx) return audioCtx;
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtx = new Ctor();
+    return audioCtx;
+  }
+
+  function startAmbient() {
+    const ctx = ensureAudioCtx();
+    if (!ctx || ambient) return;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    // Low drone oscillator with subtle LFO modulation on its frequency.
+    const drone = ctx.createOscillator();
+    drone.type = 'sine';
+    drone.frequency.value = 55;
+
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.25;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 1.5;
+    lfo.connect(lfoGain).connect(drone.frequency);
+
+    // Filtered white noise for warmth / static.
+    const bufLen = 2 * ctx.sampleRate;
+    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+    const noise = ctx.createBufferSource();
+    noise.buffer = buf;
+    noise.loop = true;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.value = 0.04;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 350;
+
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 0.5);
+
+    drone.connect(filter);
+    noise.connect(noiseGain).connect(filter);
+    filter.connect(master).connect(ctx.destination);
+
+    drone.start();
+    lfo.start();
+    noise.start();
+
+    ambient = { drone, lfo, noise, master };
+  }
+
+  function stopAmbient() {
+    if (!ambient || !audioCtx) return;
+    const ctx = audioCtx;
+    const { master, drone, lfo, noise } = ambient;
+    const now = ctx.currentTime;
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(master.gain.value, now);
+    master.gain.linearRampToValueAtTime(0, now + 0.3);
+    const refs = ambient;
+    ambient = null;
+    setTimeout(() => {
+      try { refs.drone.stop(); refs.lfo.stop(); refs.noise.stop(); } catch (e) {}
+    }, 350);
+  }
+
+  function playStripTone(i) {
+    if (!soundOn || !audioCtx) return;
+    const ctx = audioCtx;
+    const now = ctx.currentTime;
+
+    // Pitch: 110 Hz at row 0 → 1760 Hz at row 63 (4 octaves, A2 → A6).
+    const freq = 110 * Math.pow(2, (i / 63) * 4);
+    // Quartile-based waveform shift for tonal variety across the range.
+    const wf = ['sine', 'triangle', 'square', 'sawtooth'][Math.min(3, Math.floor(i / 16))];
+    // Higher rows ring shorter — keeps shuffle waves crisp, not muddy.
+    const dur = 0.18 - (i / 63) * 0.10;
+
+    const osc = ctx.createOscillator();
+    osc.type = wf;
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.92, now + dur);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.05);
+  }
+
+  btnSound.addEventListener('click', (e) => {
+    e.stopPropagation();
+    soundOn = !soundOn;
+    btnSound.classList.toggle('on', soundOn);
+    btnSound.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+    if (soundOn) startAmbient(); else stopAmbient();
+  });
+
   /* ── Download via canvas ──────────────────────────────── */
   /*
-    Re-render the visible composition into a canvas at viewport
-    size and export as JPEG. The pre-rotation composition is
-    drawn into an offscreen buffer; in portrait we then rotate
-    it 90deg CW onto the final canvas so the exported image
-    matches what's on screen.
+    Re-render the current composition at a fixed 1600 px long-side,
+    drop the UI chrome (note + copyright + controls), and overlay just
+    the TulipGrid logo in the same relative position as on the page.
+
+    Pipeline:
+      1. Compute a uniform scale so the longer viewport dimension
+         maps to 1600 px in the exported image. Aspect ratio matches
+         what's on screen.
+      2. Draw the 64 strip slices into a pre-rotation offscreen buffer
+         (swapped dimensions in portrait, same as the live render).
+      3. Copy that buffer onto the final canvas, applying a 90° CW
+         rotation in portrait so the output matches the visible
+         orientation.
+      4. Paint the TulipGrid logo on top using the same Jersey 10
+         font, font-size and position the page uses — scaled by the
+         same factor as the image.
   */
-  function downloadCanvas() {
+  async function downloadCanvas() {
     const btn = document.getElementById('btnDownload');
     btn.classList.add('loading-state');
 
+    // The Jersey 10 web font must be fully loaded before canvas can
+    // render it. document.fonts.ready resolves once all CSS fonts the
+    // page declares have finished loading.
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (e) {}
+    }
+
     const { portrait, vw, vh, gridW: gW, gridH: gH } = getCoverDims();
 
-    // Pre-rotation container (swapped dims in portrait)
-    const containerW = portrait ? vh : vw;
-    const containerH = portrait ? vw : vh;
+    const TARGET   = 1600;
+    const longSide = Math.max(vw, vh);
+    const scale    = TARGET / longSide;
+    const outW     = Math.round(vw * scale);
+    const outH     = Math.round(vh * scale);
 
-    const offX = (containerW - gW) / 2; // negative if grid overflows
-    const offY = (containerH - gH) / 2;
+    // Pre-rotation buffer dims (swapped in portrait — the grid is
+    // built upright then rotated 90° onto the final output).
+    const offW = portrait ? outH : outW;
+    const offH = portrait ? outW : outH;
 
-    // Offscreen buffer in pre-rotation orientation
-    const off = document.createElement('canvas');
-    off.width  = containerW;
-    off.height = containerH;
+    const sGridW = gW * scale;
+    const sGridH = gH * scale;
+    const offX   = (offW - sGridW) / 2;
+    const offY   = (offH - sGridH) / 2;
+
+    const off  = document.createElement('canvas');
+    off.width  = offW;
+    off.height = offH;
     const octx = off.getContext('2d');
     octx.fillStyle = '#000';
-    octx.fillRect(0, 0, containerW, containerH);
+    octx.fillRect(0, 0, offW, offH);
 
-    const stripW = gW / STRIP_COUNT;
+    const stripW = sGridW / STRIP_COUNT;
     const srcSW  = IMG_W / STRIP_COUNT;
 
     for (let i = 0; i < STRIP_COUNT; i++) {
@@ -827,23 +1122,38 @@
       octx.drawImage(
         img,
         i * srcSW, 0, srcSW, IMG_H,
-        offX + i * stripW, offY, stripW, gH
+        offX + i * stripW, offY, stripW, sGridH
       );
     }
 
-    // Final canvas in viewport orientation
-    const out = document.createElement('canvas');
-    out.width  = vw;
-    out.height = vh;
+    // Final output canvas, viewport-oriented.
+    const out  = document.createElement('canvas');
+    out.width  = outW;
+    out.height = outH;
     const fctx = out.getContext('2d');
 
     if (portrait) {
-      // 90deg CW: move origin to top-right, rotate, then draw at (0,0).
-      fctx.translate(vw, 0);
+      fctx.translate(outW, 0);
       fctx.rotate(Math.PI / 2);
       fctx.drawImage(off, 0, 0);
     } else {
       fctx.drawImage(off, 0, 0);
+    }
+
+    // Overlay TulipGrid logo. Matches the page's CSS:
+    //   Desktop: top: 20px, left: 1.56%, font-size: 96px, text-align: left
+    //   Portrait: top: 0, left: 50%, font-size: 96px, text-align: center
+    const fontPx = 96 * scale;
+    fctx.font         = `${fontPx}px "Jersey 10", monospace`;
+    fctx.fillStyle    = '#fff';
+    fctx.textBaseline = 'top';
+
+    if (portrait) {
+      fctx.textAlign = 'center';
+      fctx.fillText('TulipGrid', outW / 2, 0);
+    } else {
+      fctx.textAlign = 'left';
+      fctx.fillText('TulipGrid', outW * 0.0156, 20 * scale);
     }
 
     out.toBlob((blob) => {
@@ -851,7 +1161,7 @@
       const url = URL.createObjectURL(blob);
       const a = Object.assign(document.createElement('a'), {
         href: url,
-        download: 'field-grid.jpg',
+        download: 'tulip-grid.jpg',
       });
       document.body.appendChild(a);
       a.click();
