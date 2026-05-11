@@ -20,6 +20,7 @@
   <meta name="twitter:title"       content="TulipGrid">
   <meta name="twitter:description" content="An interactive aerial tulip field — click or drag strips to remix the landscape.">
   <meta name="twitter:image"       content="OG.jpg">
+  <link rel="icon" type="image/png" href="fav-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Jersey+10&display=swap" rel="stylesheet">
@@ -142,29 +143,20 @@
     }
 
     /*
-      Each strip-img is sized to the full grid and shifted left
-      by its index so only its own column is visible. Same
-      cover-scaled dimensions guarantee strip width === one
-      tulip row width at screen scale.
+      Each strip is rendered by a single small <canvas>. The canvas
+      fills its strip and we draw the appropriate column from the
+      source image via ctx.drawImage. This is dramatically more
+      memory-efficient than 128 large <img> elements (which is what
+      the earlier two-layer crossfade approach used, and which made
+      iOS Safari crash with a "a problem occurred" reload after the
+      Shuffle button fired 64 concurrent decodes). The 8 source
+      images are decoded once each, shared across all 64 canvases.
     */
-    .strip-img {
-      position: absolute;
-      top: 0;
-      left: calc(var(--i, 0) * -1 * var(--gw) / 64);
-      width: var(--gw);
-      height: var(--gh);
-      aspect-ratio: 2000 / 1066;
-      object-fit: fill;
-      /*
-        NOTE: do NOT add `will-change: opacity` here.
-        With 64 strips × 2 layers = 128 imgs, declaring will-change
-        on every one forces 128 separate GPU compositing layers,
-        which exhausts iOS Safari memory and triggers the "a problem
-        occurred with this webpage" reload. Opacity transitions still
-        run fine without the hint.
-      */
+    .strip-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
       pointer-events: none;
-      -webkit-user-drag: none;
     }
 
     /* ── Controls ── */
@@ -425,10 +417,19 @@
     document.documentElement.style.setProperty('--vh', window.innerHeight + 'px');
   }
   setVH();
-  window.addEventListener('resize', setVH);
-  window.addEventListener('orientationchange', setVH);
+
+  // Bundle the viewport-changed callbacks: update --vh, then resize
+  // every strip canvas to its new physical pixel dimensions. resizeCanvases
+  // is a no-op before strips are built; it's referenced (hoisted) at
+  // registration time but only called once the page is interactive.
+  function onViewportChange() {
+    setVH();
+    if (typeof resizeCanvases === 'function') resizeCanvases();
+  }
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', onViewportChange);
   if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', setVH);
+    window.visualViewport.addEventListener('resize', onViewportChange);
   }
 
   /* ── Cover-scale dimensions (mirrors the CSS) ─────────── */
@@ -461,31 +462,78 @@
     div.className = 'strip';
     div.dataset.idx = i;
 
-    // Two image layers for crossfade; layer-a starts visible
-    const imgA = createImg(i);
-    imgA.style.opacity = '1';
-    const imgB = createImg(i);
-    imgB.style.opacity = '0'; // hidden — managed via inline style, not CSS class
+    const canvas = document.createElement('canvas');
+    canvas.className = 'strip-canvas';
 
-    div.appendChild(imgA);
-    div.appendChild(imgB);
+    div.appendChild(canvas);
     grid.appendChild(div);
 
-    strips.push({ div, imgA, imgB, front: 'a' });
+    strips.push({
+      div,
+      canvas,
+      ctx: canvas.getContext('2d', { alpha: false }),
+      currentIdx: 0,   // image fully shown before any in-flight animation started
+      animFrame: null, // rAF id while animating
+    });
   }
 
-  function createImg(i) {
-    const img = document.createElement('img');
-    img.className = 'strip-img';
-    img.style.setProperty('--i', i);
-    // Tell the browser the intrinsic aspect ratio so it never falls
-    // back to natural dimensions while the src is changing.
-    img.width = IMG_W;
-    img.height = IMG_H;
-    img.decoding = 'async'; // let browser schedule decode; we gate on decode() promise
-    img.loading = 'eager';
-    img.draggable = false;
-    return img;
+  /*
+    Draw a single strip's slice of source image `imgIdx` onto its canvas,
+    fully opaque (used for initial render and for snapping to a transition's
+    final state). `alpha` is applied via ctx.globalAlpha.
+  */
+  function paintFull(s, i, imgIdx) {
+    const img = imgCache[imgIdx];
+    if (!img || s.canvas.width === 0) return;
+    const srcSW = IMG_W / STRIP_COUNT;
+    s.ctx.globalAlpha = 1;
+    s.ctx.drawImage(img, i * srcSW, 0, srcSW, IMG_H, 0, 0, s.canvas.width, s.canvas.height);
+  }
+
+  /*
+    Crossfade frame: draw `fromIdx` at full alpha, then `toIdx` at alpha t.
+    Because the from-image is always painted at alpha 1 first, the canvas
+    never goes through a transparent state — no black flashes are possible.
+  */
+  function paintBlend(s, i, fromIdx, toIdx, t) {
+    if (s.canvas.width === 0) return;
+    const srcSW = IMG_W / STRIP_COUNT;
+    const sx = i * srcSW;
+    const oldImg = imgCache[fromIdx];
+    const newImg = imgCache[toIdx];
+    s.ctx.globalAlpha = 1;
+    if (oldImg) s.ctx.drawImage(oldImg, sx, 0, srcSW, IMG_H, 0, 0, s.canvas.width, s.canvas.height);
+    s.ctx.globalAlpha = t;
+    if (newImg) s.ctx.drawImage(newImg, sx, 0, srcSW, IMG_H, 0, 0, s.canvas.width, s.canvas.height);
+  }
+
+  /*
+    Resize the physical pixel dimensions of every strip canvas to match
+    its current CSS display size at devicePixelRatio for crisp rendering.
+    Setting canvas.width/height clears the canvas, so we redraw immediately.
+    Called on initial load, resize, and orientationchange.
+  */
+  function resizeCanvases() {
+    const { gridW, gridH } = getCoverDims();
+    const stripPx = gridW / STRIP_COUNT;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.ceil(stripPx * dpr));
+    const h = Math.max(1, Math.ceil(gridH * dpr));
+
+    for (let i = 0; i < STRIP_COUNT; i++) {
+      const s = strips[i];
+      if (s.canvas.width !== w || s.canvas.height !== h) {
+        // Cancel any in-flight crossfade so it doesn't draw at the wrong size.
+        if (s.animFrame !== null) {
+          cancelAnimationFrame(s.animFrame);
+          s.currentIdx = state[i];
+          s.animFrame = null;
+        }
+        s.canvas.width = w;
+        s.canvas.height = h;
+        paintFull(s, i, s.currentIdx);
+      }
+    }
   }
 
   /* ── Preload strategy ────────────────────────────────── */
@@ -517,19 +565,17 @@
   const onSeedReady = () => {
     imgCache[0] = seed.naturalWidth > 0 ? seed : null;
 
-    // Point every strip front-layer at image 0.
-    // Inline opacity is set here to establish canonical state for
-    // the inline-only transition logic in setStrip.
-    strips.forEach(s => {
-      s.imgA.style.opacity   = '1';
-      s.imgA.style.transition = '';
-      s.imgB.style.opacity   = '0';
-      s.imgB.style.transition = '';
-      s.imgA.src = IMAGE_SRCS[0];
-    });
+    // Size every canvas to its strip and paint image 0 onto it.
+    // drawImage from a pre-decoded HTMLImageElement is synchronous and
+    // GPU-accelerated, so all 64 strips render in a single frame with
+    // zero memory spike.
+    resizeCanvases();
+    for (let i = 0; i < STRIP_COUNT; i++) {
+      paintFull(strips[i], i, 0);
+    }
 
-    // Two rAF ticks let the browser commit the src changes and paint
-    // at least one frame before we fade the loading screen out.
+    // Two rAF ticks let the browser commit the canvas paints
+    // before we fade the loading screen out.
     requestAnimationFrame(() => requestAnimationFrame(revealUI));
 
     // Phase 2: silently fetch images 1–7 in the background.
@@ -563,82 +609,68 @@
 
   /* ── Core: change one strip ───────────────────────────── */
   /*
-    Architectural invariant enforced on every call:
+    Canvas-based crossfade. On every animation frame we:
 
-      • The FRONT layer (the one named by s.front) is ALWAYS the
-        visible backdrop at opacity 1 with no transition pending.
-      • The BACK layer is ALWAYS hidden at opacity 0.
+      1. Draw the OLD image at full opacity (solid backdrop).
+      2. Draw the NEW image on top at alpha = t (fade-in).
 
-    Before doing anything else, we SNAP the strip to that canonical
-    state — cancelling any in-flight fade. This is what eliminates
-    the black-row race condition: the previous bug was that when a
-    new setStrip fired DURING a fade-in, the "incoming" layer (back)
-    was actually the in-flight fade-in target, while the "outgoing"
-    (front) was acting as a solid backdrop at opacity 1. Force-hiding
-    the new "incoming" then left only a partially-opaque layer above
-    the body's black background — visible as a black flash.
+    Because the old image is always painted first at alpha 1, the
+    canvas can never display a transparent or black state — no
+    black flashes are possible by construction.
 
-    Snapping first makes every transition start from a clean baseline.
+    On interrupt (new setStrip while one is in flight) we snap the
+    canvas to the previous transition's target and start a fresh
+    fade from there. The brief snap is imperceptible during rapid
+    interaction such as a shuffle ripple.
+
+    If the target image hasn't loaded yet (phase-2 lazy load is
+    still in progress), we instead set src on a transient <img> and
+    start the fade once it's ready. Until then the strip stays on
+    its current image — the user just doesn't see that one tap
+    landed for a few hundred ms. Far better than crashing.
   */
+  const TRANSITION_MS = 450;
+
   function setStrip(i, imgIdx) {
     const s = strips[i];
     if (state[i] === imgIdx) return;
 
-    const frontImg = s.front === 'a' ? s.imgA : s.imgB;
-    const backImg  = s.front === 'a' ? s.imgB : s.imgA;
-
-    // STEP 1 — snap any in-flight transition to its completed state.
-    // front = solid backdrop (opacity 1), back = hidden (opacity 0).
-    frontImg.style.transition = 'none';
-    frontImg.style.opacity    = '1';
-    frontImg.style.zIndex     = '';
-    backImg.style.transition  = 'none';
-    backImg.style.opacity     = '0';
-    backImg.style.zIndex      = '';
-    void frontImg.offsetWidth;  // commit the snap synchronously
-
-    // Bump generation so any in-flight decode for this strip is ignored.
-    const gen = s.gen = (s.gen || 0) + 1;
-
-    // After the snap, the back layer is guaranteed hidden — safe to swap src.
-    const incoming = backImg;
-    const outgoing = frontImg;
-
-    incoming.onload = null;
-    incoming.src = IMAGE_SRCS[imgIdx];
-
-    const commit = () => {
-      if (s.gen !== gen) return;
-
-      // outgoing is already at opacity 1 (from STEP 1's snap); it stays
-      // there as a rock-solid backdrop throughout the fade-in.
-      incoming.style.zIndex = '1';
-      outgoing.style.zIndex = '0';
-
-      // STEP 2 — fade incoming in over 450 ms.
-      incoming.style.transition = 'opacity 0.45s ease';
-      incoming.style.opacity    = '1';
-
-      s.front = s.front === 'a' ? 'b' : 'a';
-      state[i] = imgIdx;
-
-      const g = gen;
-      setTimeout(() => {
-        if (s.gen !== g) return;   // newer transition took over — skip
-        // STEP 3 — fade outgoing out (incoming is now fully opaque above it).
-        outgoing.style.transition = 'opacity 0.45s ease';
-        outgoing.style.opacity    = '0';
-        outgoing.style.zIndex     = '';
-      }, 460);
-    };
-
-    if (typeof incoming.decode === 'function') {
-      incoming.decode().then(commit).catch(() => {});
-    } else if (incoming.complete && incoming.naturalWidth > 0) {
-      commit();
-    } else {
-      incoming.onload = commit;
+    // If the target source image isn't loaded yet, wait for it.
+    // imgCache is populated as background fetches complete.
+    if (!imgCache[imgIdx]) {
+      // Trigger / piggyback on the background fetch and bail; user can tap again.
+      const probe = new Image();
+      probe.onload  = () => { imgCache[imgIdx] = probe; };
+      probe.onerror = () => {};
+      probe.src = IMAGE_SRCS[imgIdx];
+      return;
     }
+
+    // Snap any in-flight animation to its completed state, so the
+    // new transition starts from a known, fully-painted baseline.
+    if (s.animFrame !== null) {
+      cancelAnimationFrame(s.animFrame);
+      paintFull(s, i, state[i]);
+      s.currentIdx = state[i];
+      s.animFrame = null;
+    }
+
+    const fromIdx = s.currentIdx;
+    state[i] = imgIdx;
+    const start = performance.now();
+
+    function frame(now) {
+      const t = Math.min(1, (now - start) / TRANSITION_MS);
+      if (t < 1) {
+        paintBlend(s, i, fromIdx, imgIdx, t);
+        s.animFrame = requestAnimationFrame(frame);
+      } else {
+        paintFull(s, i, imgIdx);
+        s.currentIdx = imgIdx;
+        s.animFrame = null;
+      }
+    }
+    s.animFrame = requestAnimationFrame(frame);
   }
 
   function randomOther(current) {
