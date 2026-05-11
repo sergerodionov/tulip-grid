@@ -153,20 +153,16 @@
       left: calc(var(--i, 0) * -1 * var(--gw) / 64);
       width: var(--gw);
       height: var(--gh);
-      /* Force the image to fill the CSS-declared box regardless of
-         its natural aspect ratio. Some browsers (notably Arc /
-         Chromium with image lazy-decoding) briefly use the natural
-         dimensions during src changes, leaving black/empty regions. */
-      min-width: var(--gw);
-      min-height: var(--gh);
-      max-width: var(--gw);
-      max-height: var(--gh);
-      object-fit: fill;
       aspect-ratio: 2000 / 1066;
-      /* Opacity is managed exclusively via inline styles in JS —
-         no CSS class-based toggling — to avoid race conditions
-         between class changes and transition re-enabling. */
-      will-change: opacity;
+      object-fit: fill;
+      /*
+        NOTE: do NOT add `will-change: opacity` here.
+        With 64 strips × 2 layers = 128 imgs, declaring will-change
+        on every one forces 128 separate GPU compositing layers,
+        which exhausts iOS Safari memory and triggers the "a problem
+        occurred with this webpage" reload. Opacity transitions still
+        run fine without the hint.
+      */
       pointer-events: none;
       -webkit-user-drag: none;
     }
@@ -224,7 +220,7 @@
     /*
       All three are fixed overlays in viewport coordinates, so they
       are unaffected by the 90° grid rotation in portrait mode.
-      pointer-events: none keeps them non-interactive.
+      Text is selectable and the copyright link is clickable.
     */
     #logo, #ui-note, #copyright {
       position: fixed;
@@ -234,7 +230,8 @@
       color: #fff;
       white-space: nowrap;
       margin: 0;
-      pointer-events: none;
+      user-select: text;
+      -webkit-user-select: text;
       z-index: 10;
     }
 
@@ -565,33 +562,47 @@
   }
 
   /* ── Core: change one strip ───────────────────────────── */
+  /*
+    Architectural invariant enforced on every call:
+
+      • The FRONT layer (the one named by s.front) is ALWAYS the
+        visible backdrop at opacity 1 with no transition pending.
+      • The BACK layer is ALWAYS hidden at opacity 0.
+
+    Before doing anything else, we SNAP the strip to that canonical
+    state — cancelling any in-flight fade. This is what eliminates
+    the black-row race condition: the previous bug was that when a
+    new setStrip fired DURING a fade-in, the "incoming" layer (back)
+    was actually the in-flight fade-in target, while the "outgoing"
+    (front) was acting as a solid backdrop at opacity 1. Force-hiding
+    the new "incoming" then left only a partially-opaque layer above
+    the body's black background — visible as a black flash.
+
+    Snapping first makes every transition start from a clean baseline.
+  */
   function setStrip(i, imgIdx) {
     const s = strips[i];
     if (state[i] === imgIdx) return;
 
+    const frontImg = s.front === 'a' ? s.imgA : s.imgB;
+    const backImg  = s.front === 'a' ? s.imgB : s.imgA;
+
+    // STEP 1 — snap any in-flight transition to its completed state.
+    // front = solid backdrop (opacity 1), back = hidden (opacity 0).
+    frontImg.style.transition = 'none';
+    frontImg.style.opacity    = '1';
+    frontImg.style.zIndex     = '';
+    backImg.style.transition  = 'none';
+    backImg.style.opacity     = '0';
+    backImg.style.zIndex      = '';
+    void frontImg.offsetWidth;  // commit the snap synchronously
+
     // Bump generation so any in-flight decode for this strip is ignored.
     const gen = s.gen = (s.gen || 0) + 1;
 
-    // incoming = the layer we'll fade IN; outgoing = currently visible layer.
-    const incoming = s.front === 'a' ? s.imgB : s.imgA;
-    const outgoing  = s.front === 'a' ? s.imgA : s.imgB;
-
-    /*
-      Opacity is managed ENTIRELY via inline styles (never CSS classes).
-
-      Setting an inline style always wins over a class rule, so there is
-      no risk of a class-vs-transition race. We also force a reflow after
-      each instant snap so the browser commits the "from" value before we
-      enable the transition, guaranteeing the animation fires correctly.
-
-      Step 1 — hide incoming immediately.
-      Disabling the transition first means the opacity:0 is applied
-      synchronously (no animation). The forced reflow records it as the
-      committed paint state.
-    */
-    incoming.style.transition = 'none';
-    incoming.style.opacity    = '0';
-    void incoming.offsetWidth;  // commit opacity:0 as the "from" state
+    // After the snap, the back layer is guaranteed hidden — safe to swap src.
+    const incoming = backImg;
+    const outgoing = frontImg;
 
     incoming.onload = null;
     incoming.src = IMAGE_SRCS[imgIdx];
@@ -599,24 +610,12 @@
     const commit = () => {
       if (s.gen !== gen) return;
 
-      /*
-        Step 2 — guarantee the outgoing backdrop is rock-solid.
-        If a previous 460ms cleanup was fading outgoing out, cancel it
-        by snapping it back to fully opaque instantly. The reflow also
-        re-commits incoming's opacity:0, giving us a clean "from" baseline
-        for the fade-in that follows.
-      */
-      outgoing.style.transition = 'none';
-      outgoing.style.opacity    = '1';
-      void outgoing.offsetWidth;  // commits both outgoing:1 and incoming:0
-
-      // Put incoming on top; outgoing is the solid backdrop below.
+      // outgoing is already at opacity 1 (from STEP 1's snap); it stays
+      // there as a rock-solid backdrop throughout the fade-in.
       incoming.style.zIndex = '1';
       outgoing.style.zIndex = '0';
 
-      // Step 3 — fade incoming in over 450 ms.
-      // Transition is re-enabled AFTER the reflow so the browser sees
-      // a genuine opacity change from the committed 0 to the new 1.
+      // STEP 2 — fade incoming in over 450 ms.
       incoming.style.transition = 'opacity 0.45s ease';
       incoming.style.opacity    = '1';
 
@@ -626,7 +625,7 @@
       const g = gen;
       setTimeout(() => {
         if (s.gen !== g) return;   // newer transition took over — skip
-        // Step 4 — fade outgoing out (incoming is now fully opaque above it).
+        // STEP 3 — fade outgoing out (incoming is now fully opaque above it).
         outgoing.style.transition = 'opacity 0.45s ease';
         outgoing.style.opacity    = '0';
         outgoing.style.zIndex     = '';
