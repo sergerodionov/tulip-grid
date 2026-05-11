@@ -274,7 +274,7 @@
       bottom: 20px;
       right: 1.56%;
       text-align: right;
-      line-height: 1.2;
+      line-height: 1;
     }
 
     #copyright .cline {
@@ -414,8 +414,8 @@
     <svg class="icon-sound-muted" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path fill="currentColor" d="M1 8H4V11H1V8ZM4 8H7V11H4V8ZM4 13H7V16H4V13ZM6 15H9V18H6V15ZM6 9V6H9V9H6ZM8 17H11V20H8V17ZM8 7V4H11V7H8ZM10 19H13V22H10V19ZM10 16H13V19H10V16ZM10 13H13V16H10V13ZM10 10H13V13H10V10ZM10 7H13V10H10V7ZM10 4H13V7H10V4ZM10 2H13V5H10V2ZM1 11H4V14H1V11ZM1 13H4V16H1V13ZM14 8H17V11H14V8ZM16 10H19V13H16V10ZM18 12H21V15H18V12ZM14 14H17V17H14V14ZM17 11H20V14H17V11ZM20 8H23V11H20V8ZM20 14H23V17H20V14Z"/>
     </svg>
-    <svg class="icon-sound-on" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path fill="currentColor" d="M1 8H4V11H1V8ZM4 8H7V11H4V8ZM4 13H7V16H4V13ZM6 15H9V18H6V15ZM6 9V6H9V9H6ZM8 17H11V20H8V17ZM8 7V4H11V7H8ZM10 19H13V22H10V19ZM10 16H13V19H10V16ZM10 13H13V16H10V13ZM10 10H13V13H10V10ZM10 7H13V10H10V7ZM10 4H13V7H10V4ZM10 2H13V5H10V2ZM1 11H4V14H1V11ZM1 13H4V16H1V13ZM15 10H18V13H15V10ZM18 8H21V16H18V8ZM21 6H24V18H21V6Z"/>
+    <svg class="icon-sound-on" viewBox="0 0 23 24" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M1 8H4V11H1V8ZM4 8H7V11H4V8ZM4 13H7V16H4V13ZM6 15H9V18H6V15ZM6 9V6H9V9H6ZM8 17H11V20H8V17ZM8 7V4H11V7H8ZM10 19H13V22H10V19ZM10 16H13V19H10V16ZM10 13H13V16H10V13ZM10 10H13V13H10V10ZM10 7H13V10H10V7ZM10 4H13V7H10V4ZM10 2H13V5H10V2ZM15 4H18V7H15V4ZM15 17H18V20H15V17ZM17 6H20V9H17V6ZM17 15H20V18H17V15ZM19 9H22V12H19V9ZM19 12H22V15H19V12ZM1 11H4V14H1V11ZM1 13H4V16H1V13Z"/>
     </svg>
   </button>
 </nav>
@@ -731,16 +731,18 @@
     const noteChars      = splitChars(document.getElementById('ui-note'));
     const copyrightChars = splitChars(document.getElementById('copyright'));
 
-    // Cascading starts so the three blocks finish near the same time.
-    typewrite(logoChars,      45,   0);
-    typewrite(noteChars,      35, 250);
-    typewrite(copyrightChars, 22, 500).then(revealButtons);
+    // All four threads start at t=0 in parallel — three text blocks
+    // typewriting and the icon row revealing one-by-one.
+    typewrite(logoChars,      45, 0);
+    typewrite(noteChars,      35, 0);
+    typewrite(copyrightChars, 22, 0);
+    revealButtons();
   }
 
   function revealButtons() {
     const btns = document.querySelectorAll('#controls .btn');
     btns.forEach((btn, i) => {
-      setTimeout(() => btn.classList.add('revealed'), 150 + i * 180);
+      setTimeout(() => btn.classList.add('revealed'), i * 180);
     });
   }
 
@@ -961,6 +963,30 @@
     return audioCtx;
   }
 
+  /*
+    iOS Safari (and some Chromium-based mobile browsers) refuse to play any
+    Web Audio output until a silent buffer has been scheduled and started
+    DURING a real user gesture. Just calling ctx.resume() inside the click
+    handler is not always enough — the context unlocks but never emits sound.
+    Playing a one-sample silent buffer on the gesture event reliably unlocks
+    the audio pipeline. Called exactly once.
+  */
+  let audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    // Resume — must be called synchronously from the gesture handler on iOS.
+    if (ctx.state === 'suspended') ctx.resume();
+    // Schedule + play silent buffer on the same tick.
+    const buf  = ctx.createBuffer(1, 1, 22050);
+    const src  = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    audioUnlocked = true;
+  }
+
   function startAmbient() {
     const ctx = ensureAudioCtx();
     if (!ctx || ambient) return;
@@ -1052,6 +1078,8 @@
 
   btnSound.addEventListener('click', (e) => {
     e.stopPropagation();
+    // Must run inside the user gesture, before any awaits, to unlock audio on iOS.
+    unlockAudio();
     soundOn = !soundOn;
     btnSound.classList.toggle('on', soundOn);
     btnSound.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
